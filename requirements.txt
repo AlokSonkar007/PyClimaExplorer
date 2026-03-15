@@ -6,3 +6,4 @@ pandas
 numpy
 pydeck
 streamlit-plotly-events
+requests

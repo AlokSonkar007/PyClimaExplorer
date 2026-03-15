@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import pydeck as pdk
+import requests
 
 st.set_page_config(page_title="PyClimaExplorer", page_icon="", layout="wide")
 
@@ -25,11 +25,117 @@ st.markdown("""
         color: #f0f0f0;
         border-left: 4px solid #636EFA;
     }
+    .disaster-card {
+        background: #2b1111;
+        padding: 1.2rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        color: #f0f0f0;
+        border-left: 4px solid #e63946;
+    }
+    .disaster-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #e63946;
+        margin-bottom: 0.5rem;
+    }
+    .live-card {
+        background: #0a2e1a;
+        padding: 1.2rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        color: #f0f0f0;
+        border-left: 4px solid #2ecc71;
+    }
+    .live-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #2ecc71;
+        margin-bottom: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-title">PyClimaExplorer</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Interactive Climate Data Dashboard</div>', unsafe_allow_html=True)
+
+DISASTERS = [
+    {
+        "name": "1997-98 El Nino",
+        "time": "1998-01-01",
+        "lat": 0.0,
+        "lon": 180.0,
+        "category": "Ocean Warming",
+        "impact": "One of the strongest El Nino events. Caused extreme flooding in South America, droughts in Southeast Asia, coral bleaching worldwide. Estimated $35 billion in damages globally."
+    },
+    {
+        "name": "2003 European Heat Wave",
+        "time": "2003-08-01",
+        "lat": 46.0,
+        "lon": 2.0,
+        "category": "Extreme Heat",
+        "impact": "Temperatures exceeded 40C across Europe for weeks. Over 70,000 excess deaths recorded. France, Germany, and Italy were hardest hit."
+    },
+    {
+        "name": "2010 Russian Heat Wave",
+        "time": "2010-07-01",
+        "lat": 55.0,
+        "lon": 40.0,
+        "category": "Extreme Heat",
+        "impact": "Record temperatures of 44C in parts of Russia. Caused massive wildfires, crop failures, and an estimated 56,000 excess deaths."
+    },
+    {
+        "name": "2015-16 El Nino",
+        "time": "2016-01-01",
+        "lat": 0.0,
+        "lon": 160.0,
+        "category": "Ocean Warming",
+        "impact": "Rivaled 1997-98 in strength. 2016 became the hottest year on record. Massive coral bleaching on the Great Barrier Reef."
+    },
+    {
+        "name": "2020 Arctic Heat",
+        "time": "2020-06-01",
+        "lat": 70.0,
+        "lon": 100.0,
+        "category": "Polar Anomaly",
+        "impact": "Siberia hit 38C in Verkhoyansk -- highest ever recorded above the Arctic Circle. Triggered massive wildfires and permafrost thaw."
+    },
+    {
+        "name": "2023 Global Heat Records",
+        "time": "2023-07-01",
+        "lat": 35.0,
+        "lon": -10.0,
+        "category": "Global Warming",
+        "impact": "2023 confirmed as hottest year in recorded history. July 2023 was the hottest month ever. Ocean temperatures hit unprecedented levels."
+    }
+]
+
+def fetch_live_events():
+    try:
+        url = "https://eonet.gsfc.nasa.gov/api/v3/events?limit=30&status=open"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        events = []
+        for event in data.get("events", []):
+            title = event.get("title", "Unknown")
+            category = event.get("categories", [{}])[0].get("title", "Unknown")
+            geometry = event.get("geometry", [])
+            if len(geometry) == 0:
+                continue
+            latest = geometry[-1]
+            coords = latest.get("coordinates", [0, 0])
+            date = latest.get("date", "")[:10]
+            events.append({
+                "name": title,
+                "time": date,
+                "lat": float(coords[1]),
+                "lon": float(coords[0]),
+                "category": category,
+                "impact": f"Live event detected by NASA EONET. Category: {category}. Location: ({coords[1]:.1f}, {coords[0]:.1f}). Last updated: {date}."
+            })
+        return events
+    except:
+        return []
 
 uploaded_file = st.file_uploader("Upload a NetCDF file", type=["nc"])
 
@@ -354,6 +460,154 @@ if uploaded_file is not None:
 
         else:
             st.warning("No time dimension -- cannot compare periods.")
+
+        st.markdown("---")
+
+        st.subheader("Disaster Explorer")
+
+        disaster_mode = st.radio("Select Mode", ["Historical Events", "Live Events (NASA EONET)"], horizontal=True)
+
+        if disaster_mode == "Historical Events":
+            active_list = []
+            if time_dim is not None and time_dim in ds_filtered.dims:
+                for disaster in DISASTERS:
+                    d_time = pd.Timestamp(disaster["time"])
+                    if time_min <= d_time <= time_max:
+                        active_list.append(disaster)
+
+            if len(active_list) == 0:
+                active_list = DISASTERS
+
+            card_class = "disaster-card"
+            title_class = "disaster-title"
+
+        else:
+            live_events = fetch_live_events()
+            if len(live_events) > 0:
+                active_list = live_events
+            else:
+                st.warning("Could not fetch live events. Showing historical instead.")
+                active_list = DISASTERS
+
+            card_class = "live-card"
+            title_class = "live-title"
+
+        if len(active_list) > 0:
+            if "disaster_index" not in st.session_state:
+                st.session_state["disaster_index"] = 0
+
+            if st.session_state["disaster_index"] >= len(active_list):
+                st.session_state["disaster_index"] = 0
+
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+
+            with nav_col1:
+                if st.button("Previous", key="prev_disaster"):
+                    if st.session_state["disaster_index"] > 0:
+                        st.session_state["disaster_index"] -= 1
+
+            with nav_col3:
+                if st.button("Next", key="next_disaster"):
+                    if st.session_state["disaster_index"] < len(active_list) - 1:
+                        st.session_state["disaster_index"] += 1
+
+            current = active_list[st.session_state["disaster_index"]]
+
+            with nav_col2:
+                st.markdown(f"**Event {st.session_state['disaster_index'] + 1} of {len(active_list)}**")
+
+            st.markdown(f"""
+            <div class="{card_class}">
+                <div class="{title_class}">{current["name"]}</div>
+                <strong>Category:</strong> {current["category"]}<br>
+                <strong>Location:</strong> ({current["lat"]}, {current["lon"]})<br>
+                <strong>Date:</strong> {current["time"]}<br><br>
+                <strong>Impact:</strong> {current["impact"]}
+            </div>
+            """, unsafe_allow_html=True)
+
+            if lat_name and lon_name:
+                nearest_lat = min(lat_list, key=lambda x: abs(x - current["lat"]))
+                nearest_lon = min(lon_list, key=lambda x: abs(x - current["lon"]))
+
+                if time_dim is not None and time_dim in ds_filtered.dims:
+                    d_time = pd.Timestamp(current["time"])
+                    nearest_time = min(time_steps, key=lambda x: abs(x - d_time))
+
+                    disaster_slice = ds_filtered.sel({time_dim: nearest_time})
+                    disaster_z = disaster_slice.values
+
+                    if disaster_z.ndim != 2:
+                        for rd in [dd for dd in disaster_slice.dims if dd != lat_name and dd != lon_name]:
+                            disaster_slice = disaster_slice.isel({rd: 0})
+                        disaster_z = disaster_slice.values
+
+                    fig_disaster_map = px.imshow(
+                        disaster_z,
+                        x=lon_vals,
+                        y=lat_vals,
+                        color_continuous_scale="RdBu_r",
+                        labels={"x": "Longitude", "y": "Latitude", "color": selected_var},
+                        aspect="auto",
+                        origin="lower"
+                    )
+
+                    fig_disaster_map.add_trace(go.Scatter(
+                        x=[nearest_lon],
+                        y=[nearest_lat],
+                        mode="markers+text",
+                        marker=dict(color="black", size=15, symbol="circle-open", line=dict(width=3)),
+                        text=[current["name"]],
+                        textposition="top center",
+                        textfont=dict(color="black", size=12),
+                        showlegend=False
+                    ))
+
+                    fig_disaster_map.update_layout(
+                        title=f"{current['name']} -- {pd.Timestamp(nearest_time).strftime('%Y-%m-%d')}",
+                        height=450,
+                        margin=dict(l=20, r=20, t=40, b=20)
+                    )
+
+                    st.plotly_chart(fig_disaster_map)
+
+                    disaster_point = ds_filtered.sel(
+                        {lat_name: nearest_lat, lon_name: nearest_lon},
+                        method="nearest"
+                    )
+                    extra_dims = [dd for dd in disaster_point.dims if dd != time_dim]
+                    for ed in extra_dims:
+                        disaster_point = disaster_point.isel({ed: 0})
+
+                    d_time_axis = pd.to_datetime(disaster_point.coords[time_dim].values)
+                    d_val_axis = disaster_point.values
+
+                    fig_disaster_line = go.Figure()
+                    fig_disaster_line.add_trace(go.Scatter(
+                        x=d_time_axis,
+                        y=d_val_axis,
+                        mode="lines",
+                        name=selected_var,
+                        line=dict(color="#636EFA")
+                    ))
+
+                    fig_disaster_line.add_vline(
+                        x=nearest_time.timestamp() * 1000,
+                        line_dash="dash",
+                        line_color="red",
+                        annotation_text=current["name"],
+                        annotation_position="top"
+                    )
+
+                    fig_disaster_line.update_layout(
+                        title=f"Time-series at event location ({nearest_lat}, {nearest_lon})",
+                        xaxis_title="Time",
+                        yaxis_title=selected_var,
+                        height=350,
+                        margin=dict(l=20, r=20, t=40, b=20)
+                    )
+
+                    st.plotly_chart(fig_disaster_line)
 
         st.markdown("---")
 
