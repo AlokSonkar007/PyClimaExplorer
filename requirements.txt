@@ -1,0 +1,8 @@
+streamlit
+xarray
+netcdf4
+plotly
+pandas
+numpy
+pydeck
+streamlit-plotly-events
