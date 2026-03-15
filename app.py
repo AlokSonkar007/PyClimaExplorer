@@ -110,6 +110,26 @@ DISASTERS = [
     }
 ]
 
+LOCATIONS = {
+    "-- Custom (use sliders) --": (None, None),
+    "New Delhi, India": (28.6, 77.2),
+    "Mumbai, India": (19.1, 72.9),
+    "New York, USA": (40.7, -74.0),
+    "London, UK": (51.5, -0.1),
+    "Tokyo, Japan": (35.7, 139.7),
+    "Sydney, Australia": (-33.9, 151.2),
+    "Cairo, Egypt": (30.0, 31.2),
+    "Moscow, Russia": (55.8, 37.6),
+    "Sao Paulo, Brazil": (-23.5, -46.6),
+    "Beijing, China": (39.9, 116.4),
+    "Nairobi, Kenya": (-1.3, 36.8),
+    "Arctic (North Pole)": (85.0, 0.0),
+    "Antarctic (South Pole)": (-85.0, 0.0),
+    "Central Pacific (El Nino)": (0.0, 180.0),
+    "Sahara Desert": (23.0, 12.0),
+    "Amazon Rainforest": (-3.0, -60.0),
+}
+
 def fetch_live_events():
     try:
         url = "https://eonet.gsfc.nasa.gov/api/v3/events?limit=30&status=open"
@@ -172,12 +192,17 @@ if uploaded_file is not None:
         time_min = time_values.min().to_pydatetime()
         time_max = time_values.max().to_pydatetime()
 
-        selected_time = control_col2.slider(
+        selected_time = control_col2.date_input(
             "Select Time Range",
-            min_value=time_min,
-            max_value=time_max,
-            value=(time_min, time_max)
+            value=(time_min.date(), time_max.date()),
+            min_value=time_min.date(),
+            max_value=time_max.date()
         )
+
+        if len(selected_time) == 2:
+            selected_time = (pd.Timestamp(selected_time[0]), pd.Timestamp(selected_time[1]))
+        else:
+            selected_time = (pd.Timestamp(selected_time[0]), pd.Timestamp(time_max))
 
         ds_filtered = ds[selected_var].sel({time_dim: slice(selected_time[0], selected_time[1])})
     else:
@@ -226,25 +251,123 @@ if uploaded_file is not None:
 
         fig.update_layout(
             height=500,
-            margin=dict(l=20, r=20, t=30, b=20)
+            margin=dict(l=60, r=60, t=30, b=20)
         )
 
-        st.plotly_chart(fig)
+        pad1, spatial_main, pad2 = st.columns([0.3, 5, 0.3])
+        with spatial_main:
+            st.plotly_chart(fig)
+
+        st.markdown("---")
+
+        st.subheader("Animated Timelapse")
+        st.caption("Watch how the data changes over time")
+
+        if time_dim is not None and time_dim in ds_filtered.dims:
+            n_frames = min(20, len(time_steps))
+            frame_indices = np.linspace(0, len(time_steps) - 1, n_frames, dtype=int)
+
+            step_lat = max(1, len(lat_vals) // 60)
+            step_lon = max(1, len(lon_vals) // 60)
+            lat_anim = lat_vals[::step_lat]
+            lon_anim = lon_vals[::step_lon]
+
+            all_frames_data = []
+            for idx in frame_indices:
+                t = time_steps[idx]
+                frame_slice = ds_filtered.sel({time_dim: t})
+                fz = frame_slice.values
+                if fz.ndim != 2:
+                    for rd in [dd for dd in frame_slice.dims if dd != lat_name and dd != lon_name]:
+                        frame_slice = frame_slice.isel({rd: 0})
+                    fz = frame_slice.values
+                all_frames_data.append(fz[::step_lat, ::step_lon])
+
+            global_zmin = min(np.nanmin(f) for f in all_frames_data)
+            global_zmax = max(np.nanmax(f) for f in all_frames_data)
+
+            fig_anim = go.Figure(
+                data=go.Heatmap(
+                    z=all_frames_data[0],
+                    x=lon_anim,
+                    y=lat_anim,
+                    colorscale="RdBu_r",
+                    zmin=global_zmin,
+                    zmax=global_zmax,
+                    colorbar=dict(title=selected_var)
+                )
+            )
+
+            frames = []
+            for i, idx in enumerate(frame_indices):
+                frames.append(go.Frame(
+                    data=[go.Heatmap(
+                        z=all_frames_data[i],
+                        x=lon_anim,
+                        y=lat_anim,
+                        colorscale="RdBu_r",
+                        zmin=global_zmin,
+                        zmax=global_zmax
+                    )],
+                    name=str(time_steps[idx].strftime("%Y-%m-%d"))
+                ))
+
+            fig_anim.frames = frames
+
+            fig_anim.update_layout(
+                height=500,
+                margin=dict(l=60, r=60, t=30, b=20),
+                updatemenus=[dict(
+                    type="buttons",
+                    showactive=False,
+                    x=0.0,
+                    y=-0.05,
+                    buttons=[
+                        dict(label="Play", method="animate", args=[None, {"frame": {"duration": 500, "redraw": True}, "fromcurrent": True}]),
+                        dict(label="Pause", method="animate", args=[[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"}])
+                    ]
+                )],
+                sliders=[dict(
+                    active=0,
+                    steps=[dict(
+                        args=[[str(time_steps[frame_indices[i]].strftime("%Y-%m-%d"))], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate"}],
+                        label=str(time_steps[frame_indices[i]].strftime("%Y-%m-%d")),
+                        method="animate"
+                    ) for i in range(n_frames)],
+                    x=0.0,
+                    len=1.0,
+                    y=-0.1
+                )]
+            )
+
+            pad3, anim_main, pad4 = st.columns([0.3, 5, 0.3])
+            with anim_main:
+                st.plotly_chart(fig_anim)
 
         st.markdown("---")
 
         st.subheader("Temporal View")
-        st.caption("Drag the sliders to pick a location from the map above")
+
+        lat_list = sorted(lat_vals.tolist())
+        lon_list = sorted(lon_vals.tolist())
+
+        location_pick = st.selectbox("Quick Location Jump", list(LOCATIONS.keys()))
+
+        if LOCATIONS[location_pick][0] is not None:
+            target_lat = LOCATIONS[location_pick][0]
+            target_lon = LOCATIONS[location_pick][1]
+            default_lat = min(lat_list, key=lambda x: abs(x - target_lat))
+            default_lon = min(lon_list, key=lambda x: abs(x - target_lon))
+        else:
+            default_lat = lat_list[len(lat_list) // 2]
+            default_lon = lon_list[len(lon_list) // 2]
+
+        loc_col1, loc_col2 = st.columns(2)
+
+        picked_lat = loc_col1.select_slider("Select Latitude", options=lat_list, value=default_lat)
+        picked_lon = loc_col2.select_slider("Select Longitude", options=lon_list, value=default_lon)
 
         if time_dim is not None and time_dim in ds_filtered.dims:
-            loc_col1, loc_col2 = st.columns(2)
-
-            lat_list = sorted(lat_vals.tolist())
-            lon_list = sorted(lon_vals.tolist())
-
-            picked_lat = loc_col1.select_slider("Select Latitude", options=lat_list, value=lat_list[len(lat_list) // 2])
-            picked_lon = loc_col2.select_slider("Select Longitude", options=lon_list, value=lon_list[len(lon_list) // 2])
-
             point_data = ds_filtered.sel(
                 {lat_name: picked_lat, lon_name: picked_lon},
                 method="nearest"
@@ -279,12 +402,23 @@ if uploaded_file is not None:
                 line=dict(color="#636EFA")
             ))
 
+            window = min(12, len(val_axis) // 4)
+            if window > 1:
+                moving_avg = pd.Series(val_axis).rolling(window=window, center=True).mean()
+                fig2.add_trace(go.Scatter(
+                    x=time_axis,
+                    y=moving_avg,
+                    mode="lines",
+                    name=f"Moving Avg ({window})",
+                    line=dict(color="orange", width=2, dash="dot")
+                ))
+
             if len(anomaly_times) > 0:
                 fig2.add_trace(go.Scatter(
                     x=anomaly_times,
                     y=anomaly_vals,
                     mode="markers",
-                    name="Anomaly (|Z| > 2)",
+                    name="Extremes",
                     marker=dict(color="red", size=10, symbol="x")
                 ))
 
@@ -292,8 +426,10 @@ if uploaded_file is not None:
             fig2.add_hline(y=mean_val - 2 * std_val, line_dash="dash", line_color="red", opacity=0.5)
             fig2.add_hline(y=mean_val, line_dash="dot", line_color="gray", opacity=0.5)
 
+            display_name = location_pick if LOCATIONS[location_pick][0] is not None else f"({picked_lat}, {picked_lon})"
+
             fig2.update_layout(
-                title=f"{selected_var} at ({picked_lat}, {picked_lon})",
+                title=f"{selected_var} at {display_name}",
                 xaxis_title="Time",
                 yaxis_title=selected_var,
                 height=400,
@@ -307,7 +443,7 @@ if uploaded_file is not None:
             st.subheader("Anomaly Summary")
 
             if len(anomaly_times) > 0:
-                st.warning(f"Found {len(anomaly_times)} anomalies (|Z-score| > 2)")
+                st.warning(f"Found {len(anomaly_times)} extremes (|Z-score| > 2)")
                 anomaly_df = pd.DataFrame({
                     "Time": anomaly_times.strftime("%Y-%m-%d"),
                     "Value": anomaly_vals,
@@ -316,7 +452,61 @@ if uploaded_file is not None:
                 anomaly_df["Z-Score"] = anomaly_df["Z-Score"].round(2)
                 st.dataframe(anomaly_df)
             else:
-                st.success("No anomalies detected at this location.")
+                st.success("No extremes detected at this location.")
+
+            st.markdown("---")
+
+            st.subheader("Top 5 Extremes")
+
+            top5_col1, top5_col2 = st.columns(2)
+
+            sorted_high = np.argsort(val_axis)[::-1][:5]
+            sorted_low = np.argsort(val_axis)[:5]
+
+            with top5_col1:
+                st.markdown("**Highest Values**")
+                high_df = pd.DataFrame({
+                    "Rank": range(1, 6),
+                    "Time": [time_axis[i].strftime("%Y-%m-%d") for i in sorted_high],
+                    "Value": [round(val_axis[i], 2) for i in sorted_high]
+                })
+                st.dataframe(high_df, hide_index=True)
+
+            with top5_col2:
+                st.markdown("**Lowest Values**")
+                low_df = pd.DataFrame({
+                    "Rank": range(1, 6),
+                    "Time": [time_axis[i].strftime("%Y-%m-%d") for i in sorted_low],
+                    "Value": [round(val_axis[i], 2) for i in sorted_low]
+                })
+                st.dataframe(low_df, hide_index=True)
+
+            st.markdown("---")
+
+            st.subheader("Distribution View")
+            st.caption("Histogram showing how values are spread at this location")
+
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Histogram(
+                x=val_axis,
+                nbinsx=30,
+                marker_color="#636EFA",
+                opacity=0.8,
+                name="Distribution"
+            ))
+
+            fig_hist.add_vline(x=mean_val, line_dash="dot", line_color="gray", annotation_text="Mean", annotation_position="top")
+            fig_hist.add_vline(x=mean_val + 2 * std_val, line_dash="dash", line_color="red", annotation_text="+2 Std", annotation_position="top")
+            fig_hist.add_vline(x=mean_val - 2 * std_val, line_dash="dash", line_color="red", annotation_text="-2 Std", annotation_position="top")
+
+            fig_hist.update_layout(
+                xaxis_title=selected_var,
+                yaxis_title="Count",
+                height=350,
+                margin=dict(l=20, r=20, t=30, b=20)
+            )
+
+            st.plotly_chart(fig_hist)
 
             st.markdown("---")
 
@@ -346,9 +536,9 @@ if uploaded_file is not None:
                     insights.append(f"Trend: {selected_var} decreased by {abs(trend_diff):.2f} (comparing first half vs second half of the time range)")
 
             if len(anomaly_times) > 0:
-                insights.append(f"Anomalies: {len(anomaly_times)} statistically unusual events detected (beyond 2 standard deviations)")
+                insights.append(f"Extremes: {len(anomaly_times)} statistically unusual events detected (beyond 2 standard deviations)")
             else:
-                insights.append("Stability: No significant anomalies detected -- data is relatively stable")
+                insights.append("Stability: No significant extremes detected -- data is relatively stable")
 
             for insight in insights:
                 st.markdown(f'<div class="insight-card">{insight}</div>', unsafe_allow_html=True)
@@ -448,9 +638,12 @@ if uploaded_file is not None:
             )
             fig_diff.update_layout(
                 height=400,
-                margin=dict(l=20, r=20, t=30, b=20)
+                margin=dict(l=60, r=60, t=30, b=20)
             )
-            st.plotly_chart(fig_diff)
+
+            pad5, diff_main, pad6 = st.columns([0.3, 5, 0.3])
+            with diff_main:
+                st.plotly_chart(fig_diff)
 
             diff_mean = np.nanmean(diff_vals)
             if diff_mean > 0:
@@ -668,9 +861,7 @@ if uploaded_file is not None:
         if time_dim is not None and time_dim in ds_filtered.dims:
             export_df = pd.DataFrame({
                 "Time": time_axis.strftime("%Y-%m-%d"),
-                selected_var: val_axis,
-                "Z-Score": z_scores.round(2),
-                "Is_Anomaly": anomaly_mask
+                selected_var: val_axis
             })
 
             st.dataframe(export_df)

@@ -2,8 +2,8 @@ streamlit
 xarray
 netcdf4
 plotly
-pandas
 numpy
-pydeck
-streamlit-plotly-events
+pandas
 requests
+geopy
+reverse_geocoder
