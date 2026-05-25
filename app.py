@@ -11,7 +11,12 @@ import requests
 st.set_page_config(page_title="PyClimaExplorer", page_icon="", layout="wide")
 
 # Path to bundled sample dataset — loaded automatically on first visit
-SAMPLE_DATA_PATH = os.path.join(os.path.dirname(__file__), "air_sig995_2020.nc")
+# Works locally and on Streamlit Cloud (file must be in the same repo folder as app.py)
+try:
+    _here = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _here = os.getcwd()
+SAMPLE_DATA_PATH = os.path.join(_here, "air_sig995_2020.nc")
 
 st.markdown("""
 <style>
