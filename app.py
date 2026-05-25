@@ -10,13 +10,14 @@ import requests
 
 st.set_page_config(page_title="PyClimaExplorer", page_icon="", layout="wide")
 
-# Path to bundled sample dataset — loaded automatically on first visit
-# Works locally and on Streamlit Cloud (file must be in the same repo folder as app.py)
-try:
-    _here = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    _here = os.getcwd()
-SAMPLE_DATA_PATH = os.path.join(_here, "air_sig995_2020.nc")
+_SAMPLE_FILENAME = "air_sig995_2020.nc"
+if os.path.exists(_SAMPLE_FILENAME):
+    SAMPLE_DATA_PATH = _SAMPLE_FILENAME
+else:
+    try:
+        SAMPLE_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), _SAMPLE_FILENAME)
+    except Exception:
+        SAMPLE_DATA_PATH = _SAMPLE_FILENAME
 
 st.markdown("""
 <style>
@@ -176,7 +177,7 @@ if using_sample:
         ds.close()
         st.info("📊 Showing sample dataset: **air_sig995_2020.nc** (Near-Surface Air Temperature, 2020). Upload your own .nc file above to explore your data.")
     else:
-        st.info("Upload a .nc file to get started.")
+        st.error(f"⚠️ Sample file not found at: `{os.path.abspath(SAMPLE_DATA_PATH)}` — CWD is `{os.getcwd()}`. Please upload a .nc file manually.")
         st.stop()
 else:
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".nc")
