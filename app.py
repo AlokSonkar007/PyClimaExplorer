@@ -10,7 +10,10 @@ import requests
 
 st.set_page_config(page_title="PyClimaExplorer", page_icon="", layout="wide")
 
-_SAMPLE_FILENAME = "air_sig995_2020.nc"
+# Path to bundled sample dataset — loaded automatically on first visit
+# Streamlit Cloud always runs with CWD = repo root, so a plain filename works.
+# For local use, we also try the script's own directory as a fallback.
+_SAMPLE_FILENAME = "air.sig995.2020.nc"
 if os.path.exists(_SAMPLE_FILENAME):
     SAMPLE_DATA_PATH = _SAMPLE_FILENAME
 else:
@@ -175,7 +178,7 @@ if using_sample:
         ds = xr.open_dataset(SAMPLE_DATA_PATH)
         ds.load()
         ds.close()
-        st.info("📊 Showing sample dataset: **air_sig995_2020.nc** (Near-Surface Air Temperature, 2020). Upload your own .nc file above to explore your data.")
+        st.info("📊 Showing sample dataset: **air.sig995.2020.nc** (Near-Surface Air Temperature, 2020). Upload your own .nc file above to explore your data.")
     else:
         st.error(f"⚠️ Sample file not found at: `{os.path.abspath(SAMPLE_DATA_PATH)}` — CWD is `{os.getcwd()}`. Please upload a .nc file manually.")
         st.stop()
