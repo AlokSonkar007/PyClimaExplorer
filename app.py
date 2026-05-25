@@ -10,6 +10,9 @@ import requests
 
 st.set_page_config(page_title="PyClimaExplorer", page_icon="", layout="wide")
 
+# Path to bundled sample dataset — loaded automatically on first visit
+SAMPLE_DATA_PATH = os.path.join(os.path.dirname(__file__), "air_sig995_2020.nc")
+
 st.markdown("""
 <style>
     .stApp {
@@ -159,7 +162,18 @@ def fetch_live_events():
 
 uploaded_file = st.file_uploader("Upload a NetCDF file", type=["nc"])
 
-if uploaded_file is not None:
+# Determine which dataset to load: uploaded file takes priority, otherwise fall back to sample data
+using_sample = uploaded_file is None
+if using_sample:
+    if os.path.exists(SAMPLE_DATA_PATH):
+        ds = xr.open_dataset(SAMPLE_DATA_PATH)
+        ds.load()
+        ds.close()
+        st.info("📊 Showing sample dataset: **air_sig995_2020.nc** (Near-Surface Air Temperature, 2020). Upload your own .nc file above to explore your data.")
+    else:
+        st.info("Upload a .nc file to get started.")
+        st.stop()
+else:
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".nc")
     tmp.write(uploaded_file.getbuffer())
     tmp.close()
@@ -167,6 +181,8 @@ if uploaded_file is not None:
     ds.load()
     ds.close()
     os.unlink(tmp.name)
+
+if True:  # dashboard always runs once ds is loaded
 
     st.subheader("Dataset Overview")
     col1, col2, col3 = st.columns(3)
@@ -877,6 +893,3 @@ if uploaded_file is not None:
 
     else:
         st.warning("Could not find latitude/longitude dimensions.")
-
-else:
-    st.info("Upload a .nc file to get started.")
